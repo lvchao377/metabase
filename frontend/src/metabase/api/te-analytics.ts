@@ -1,8 +1,12 @@
 import { Api } from "./api";
 
-export const TE_METRICS = ["count", "unique_users"] as const;
+export const TE_METRICS = ["count", "unique_users", "sum"] as const;
 
 export type TeMetric = (typeof TE_METRICS)[number];
+
+export const TE_TIME_GRAINS = ["day", "hour", "week"] as const;
+
+export type TeTimeGrain = (typeof TE_TIME_GRAINS)[number];
 
 export type TeColumnRole = "time" | "user_subject" | "attribute";
 
@@ -13,6 +17,7 @@ export type TeColumn = {
   role: TeColumnRole | null;
   groupable: boolean;
   filterable: boolean;
+  summable: boolean;
 };
 
 export type TeEvent = {
@@ -24,6 +29,7 @@ export type TeEvent = {
   user_subject_column: string;
   properties_column: string | null;
   stub: boolean;
+  note: string | null;
   available_columns: TeColumn[];
 };
 
@@ -46,10 +52,13 @@ export type TeEventFilter = {
 export type TeEventQueryRequest = {
   event_key: string;
   metric: TeMetric;
+  measure?: string;
   time_range: {
     start: string;
     end: string;
   };
+  time_grain: TeTimeGrain;
+  database_id?: number;
   group_by: string[];
   filters: TeEventFilter[];
 };
@@ -59,13 +68,17 @@ export type TeResultColumn = {
   base_type: string;
 };
 
+export type TeCell = string | number | boolean | null;
+
 export type TeEventQueryResponse = {
-  status: "dry_run";
-  execution: "stub";
+  status: "compiled";
+  execution: "stub" | "database";
+  database_id: number | null;
   sql: string;
   columns: TeResultColumn[];
-  rows: Array<Array<string | number | boolean | null>>;
+  rows: TeCell[][];
   row_count: number;
+  time_grain: TeTimeGrain | null;
   note: string;
 };
 

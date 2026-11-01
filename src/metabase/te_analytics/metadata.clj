@@ -11,16 +11,20 @@
   #"^[A-Za-z_][A-Za-z0-9_]*$")
 
 (defn- col
-  "One registered column. `role` is `:time`, `:user-subject`, or `:attribute`."
-  [column-name display-name base-type role & {:keys [groupable filterable]
-                                              :or   {groupable true
-                                                     filterable true}}]
+  "One registered column. `role` is `:time`, `:user-subject`, or `:attribute`.
+
+  `:summable` is true only when this event explicitly allows `SUM` of the column."
+  [column-name display-name base-type role & {:keys [groupable filterable summable]
+                                              :or   {groupable  true
+                                                     filterable true
+                                                     summable   false}}]
   {:name         column-name
    :display-name display-name
    :base-type    base-type
    :role         role
    :groupable    groupable
-   :filterable   filterable})
+   :filterable   filterable
+   :summable     summable})
 
 (def ^:private event-game-columns
   [(col "time" "事件时间" "type/DateTime" :time)
@@ -29,14 +33,18 @@
    (col "server_id" "服务器" "type/Text" :attribute)
    (col "channel" "渠道" "type/Text" :attribute)
    (col "os" "系统" "type/Text" :attribute)
-   (col "vip_level" "VIP 等级" "type/Integer" :attribute)
+   (col "vip_level" "VIP 等级" "type/Integer" :attribute :summable true)
    (col "properties" "扩展属性" "type/JSON" :attribute :groupable false :filterable false)])
 
 (def ^:private event-activity-play-columns
-  "This table does not carry the common attributes (`region_id`, `vip_level`, `properties`)."
+  "Only these three columns are confirmed for `dwd_event_activity_play`.
+  `region_id`, `vip_level`, and `properties` are not registered."
   [(col "time" "事件时间" "type/DateTime" :time)
    (col "role_id" "角色 ID" "type/Text" :user-subject)
    (col "activity_id" "活动 ID" "type/Text" :attribute)])
+
+(def ^:private activity-play-note
+  "只确认了 time、role_id、activity_id。region_id、vip_level、properties 未在这张表上登记。")
 
 (defn- bad-metadata!
   [message data]
@@ -81,6 +89,7 @@
      :user-subject-column  "role_id"
      :properties-column    "properties"
      :stub                 false
+     :note                 nil
      :available-columns    event-game-columns})
    (validate-event!
     {:event-key            "event_activity_play"
@@ -91,6 +100,7 @@
      :user-subject-column  "role_id"
      :properties-column    nil
      :stub                 true
+     :note                 activity-play-note
      :available-columns    event-activity-play-columns})])
 
 (defn events

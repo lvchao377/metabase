@@ -85,7 +85,7 @@
   (first (filter #(= column-name (:name %)) (:available-columns event))))
 
 (defn- require-column!
-  "The registered column `column-name`. When `purpose` is `:group` or `:filter`, the column must allow that use."
+  "The registered column `column-name`. When `purpose` is `:group`, `:filter`, or `:sum`, the column must allow that use."
   ([event column-name]
    (require-column! event column-name nil))
   ([event column-name purpose]
@@ -99,6 +99,8 @@
        (reject! (format "列 %s 不可用于分组" column-name) {:column column-name}))
      (when (and (= purpose :filter) (not (:filterable column)))
        (reject! (format "列 %s 不可用于过滤" column-name) {:column column-name}))
+     (when (and (= purpose :sum) (not (:summable column)))
+       (reject! (format "列 %s 不可用于求和" column-name) {:column column-name}))
      column)))
 
 (defn- require-event-shape!
@@ -112,22 +114,36 @@
   (quote-ident (:schema event))
   (quote-ident (:table event)))
 
+(def ^:private time-grains
+  #{"day" "hour" "week"})
+
+(defn- time-bucket
+  "Spark SQL bucket for the time column. `day` stays `to_date` so a calendar day is one row."
+  [column-name grain]
+  (case grain
+    "day"  {:sql       (str "to_date(" (quote-ident column-name) ")")
+            :alias     "time_day"
+            :base-type "type/Date"}
+    "hour" {:sql       (str "date_trunc('hour', " (quote-ident column-name) ")")
+            :alias     "time_hour"
+            :base-type "type/DateTime"}
+    "week" {:sql       (str "date_trunc('week', " (quote-ident column-name) ")")
+            :alias     "time_week"
+            :base-type "type/DateTime"}
+    (reject! (str "未知时间粒度：" grain) {:time_grain grain})))
+
 (defn- group-select
-  "SELECT/GROUP BY item for `column-name`. The time column is bucketed by day."
-  [event column-name]
+  "SELECT/GROUP BY item for `column-name`. The time column uses `grain` (`day`, `hour`, or `week`)."
+  [event column-name grain]
   (let [column (require-column! event column-name :group)]
     (if (= column-name (:time-column event))
-      ;; Spark SQL day bucket (also accepted by Hive and MaxCompute). Grouping the raw
-      ;; timestamp would split one calendar day into one row per distinct instant.
-      {:sql       (str "to_date(" (quote-ident column-name) ")")
-       :alias     "time_day"
-       :base-type "type/Date"}
+      (time-bucket column-name grain)
       {:sql       (quote-ident column-name)
        :alias     column-name
        :base-type (:base-type column)})))
 
 (defn- metric-select
-  [event metric]
+  [event metric measure]
   (case metric
     "count"
     {:sql "COUNT(*)" :alias "event_count" :base-type "type/Integer"}
@@ -138,6 +154,15 @@
       {:sql       (str "COUNT(DISTINCT " (quote-ident subject) ")")
        :alias     "unique_users"
        :base-type "type/Integer"})
+
+    "sum"
+    (do
+      (when-not (string? measure)
+        (reject! "求和需要 measure，指向该事件可求和的列" {:metric metric}))
+      (let [column (require-column! event measure :sum)]
+        {:sql       (str "SUM(" (quote-ident (:name column)) ")")
+         :alias     (str measure "_sum")
+         :base-type (:base-type column)}))
 
     (reject! (str "未知指标：" metric) {:metric metric})))
 
@@ -204,32 +229,48 @@
   (when-not (or (nil? group-by) (every? string? group-by))
     (reject! "group_by 的每一项必须是列名" {})))
 
+(defn- require-time-grain!
+  [time-grain]
+  (let [grain (or time-grain "day")]
+    (when-not (time-grains grain)
+      (reject! (str "未知时间粒度：" time-grain) {:time_grain time-grain}))
+    grain))
+
 (defn compile-query
   "Compile `request` against `event`.
 
-  `request` is a map of `:metric` (`\"count\"` or `\"unique_users\"`), `:time-range`
-  (`:start` and `:end` as inclusive `YYYY-MM-DD` dates), optional `:group-by` column
-  names, and optional `:filters` of `:column`, `:op`, and `:value`.
+  `request` keys:
 
-  Returns `{:sql :columns}`. Throws ExceptionInfo with `:status-code` 400 when a
-  column is not in the event's `:available-columns`, or is not allowed for that use.
-  The time column is grouped with `to_date`. `unique_users` counts the event's user
-  subject column, which is not assumed to be `role_id`."
-  [event {:keys [metric time-range group-by filters]}]
+  - `:metric` — `\"count\"`, `\"unique_users\"`, or `\"sum\"`
+  - `:measure` — column to sum; required for `\"sum\"`, and it must be `:summable`
+  - `:time-range` — inclusive `:start` and `:end` dates, `YYYY-MM-DD`
+  - `:time-grain` — `\"day\"` (default), `\"hour\"`, or `\"week\"`, used when the time column is grouped
+  - `:group-by` — column names from `:available-columns` that are groupable
+  - `:filters` — maps of `:column`, `:op`, and `:value`
+
+  Returns `{:sql :columns :time-grain}`. `:time-grain` is the applied bucket, or nil when the
+  time column is not grouped. Throws ExceptionInfo with `:status-code` 400 when a column
+  is missing from the event or is not allowed for that use. `unique_users` counts the
+  event's user subject column."
+  [event {:keys [metric measure time-range time-grain group-by filters]}]
   (require-event-shape! event)
   (require-group-by! group-by)
   (when-not (or (nil? filters) (sequential? filters))
     (reject! "filters 必须是列表" {:value filters}))
-  (let [groups      (map #(group-select event %) (or group-by []))
-        metric-item (metric-select event metric)
+  (let [grain       (require-time-grain! time-grain)
+        grouped     (vec (or group-by []))
+        groups      (map #(group-select event % grain) grouped)
+        metric-item (metric-select event metric measure)
         where       (concat (time-predicate event time-range)
                             (map #(filter-sql event %) (or filters [])))
         from        (str (quote-ident (:schema event)) "." (quote-ident (:table event)))
-        items       (concat groups [metric-item])]
-    {:sql     (compile-sql from groups metric-item where)
-     :columns (mapv (fn [{:keys [alias base-type]}]
-                      {:name alias :base_type base-type})
-                    items)}))
+        items       (concat groups [metric-item])
+        applied     (when (some #(= % (:time-column event)) grouped) grain)]
+    {:sql        (compile-sql from groups metric-item where)
+     :columns    (mapv (fn [{:keys [alias base-type]}]
+                         {:name alias :base_type base-type})
+                       items)
+     :time-grain applied}))
 
 (defn compile-event-query
   "Compile `request` for the registered event named by `:event-key`. See [[compile-query]]."

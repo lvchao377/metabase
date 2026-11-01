@@ -3,6 +3,7 @@
    [clojure.set :as set]
    [clojure.string :as str]
    [clojure.test :refer :all]
+   [metabase.te-analytics.core :as te]
    [metabase.te-analytics.metadata :as metadata]
    [metabase.te-analytics.query :as query]))
 
@@ -156,3 +157,73 @@
                        :time-range {:start "2026-02-31" :end "2026-03-01"}}))]
     (is (= 400 (:status-code (ex-data e))))
     (is (re-find #"不是合法日期" (ex-message e)))))
+
+(deftest hour-and-week-buckets-test
+  (let [hour-sql (:sql (query/compile-event-query
+                        {:event-key  "event_game"
+                         :metric     "unique_users"
+                         :time-range day-range
+                         :time-grain "hour"
+                         :group-by   ["time"]}))
+        week-sql (:sql (query/compile-event-query
+                        {:event-key  "event_game"
+                         :metric     "count"
+                         :time-range day-range
+                         :time-grain "week"
+                         :group-by   ["time"]}))]
+    (is (str/includes? hour-sql "date_trunc('hour', `time`) AS `time_hour`"))
+    (is (str/includes? hour-sql "COUNT(DISTINCT `role_id`)"))
+    (is (not (str/includes? hour-sql "to_date")))
+    (is (str/includes? week-sql "date_trunc('week', `time`) AS `time_week`"))
+    (is (= "hour" (:time-grain (query/compile-event-query
+                                {:event-key  "event_game"
+                                 :metric     "unique_users"
+                                 :time-range day-range
+                                 :time-grain "hour"
+                                 :group-by   ["time"]}))))))
+
+(deftest sum-uses-declared-numeric-column-test
+  (let [sql (:sql (query/compile-event-query
+                   {:event-key  "event_game"
+                    :metric     "sum"
+                    :measure    "vip_level"
+                    :time-range day-range
+                    :group-by   ["time"]}))]
+    (is (str/includes? sql "SUM(`vip_level`) AS `vip_level_sum`"))
+    (is (str/includes? sql "to_date(`time`) AS `time_day`")))
+  (let [e (ex-info? #(query/compile-event-query
+                      {:event-key  "event_game"
+                       :metric     "sum"
+                       :measure    "role_id"
+                       :time-range day-range}))]
+    (is (= 400 (:status-code (ex-data e))))
+    (is (re-find #"不可用于求和" (ex-message e))))
+  (let [e (ex-info? #(query/compile-event-query
+                      {:event-key  "event_activity_play"
+                       :metric     "sum"
+                       :measure    "vip_level"
+                       :time-range day-range}))]
+    (is (= 400 (:status-code (ex-data e))))
+    (is (re-find #"available_columns" (ex-message e)))))
+
+(deftest activity-play-note-lists-only-known-columns-test
+  (let [event (metadata/event "event_activity_play")]
+    (is (true? (:stub event)))
+    (is (re-find #"activity_id" (:note event)))
+    (is (not-any? :summable (:available-columns event)))))
+
+(deftest stub-runner-echoes-database-id-test
+  (let [result (te/run-event-query
+                {:event-key    "event_game"
+                 :metric       "unique_users"
+                 :time-range   day-range
+                 :time-grain   "day"
+                 :group-by     ["time"]
+                 :database-id  12})]
+    (is (= "compiled" (:status result)))
+    (is (= "stub" (:execution result)))
+    (is (= 12 (:database_id result)))
+    (is (= [] (:rows result)))
+    (is (= 0 (:row_count result)))
+    (is (str/includes? (:sql result) "COUNT(DISTINCT `role_id`)"))
+    (is (str/includes? (:sql result) "to_date(`time`)"))))
