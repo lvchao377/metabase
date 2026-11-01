@@ -41,6 +41,7 @@ export * from "./snippet";
 export * from "./subscription";
 export * from "./table";
 export * from "./task";
+export * from "./te-analytics";
 export * from "./timeline";
 export * from "./timeline-event";
 export * from "./transform";

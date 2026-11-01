@@ -189,6 +189,18 @@ export function MainNavbarView({
             </SidebarLink>
           </SidebarSection>
 
+          <SidebarSection>
+            <SidebarHeading>{t`分析`}</SidebarHeading>
+            <SidebarLink
+              isSelected={nonEntityItem?.url === "/analytics/events"}
+              icon="insight"
+              onClick={onItemSelect}
+              url="/analytics/events"
+            >
+              {t`事件分析`}
+            </SidebarLink>
+          </SidebarSection>
+
           {shouldDisplayGettingStarted && (
             <SidebarSection>
               <ErrorBoundary>

@@ -370,6 +370,7 @@ const elements = [
   }),
   createElement({ type: "feature", name: "reference" }),
   createElement({ type: "feature", name: "search" }),
+  createElement({ type: "feature", name: "te-analytics" }),
 
   // app
   // Composition/barrel file for reducers shared among the embedding sdk and the core app

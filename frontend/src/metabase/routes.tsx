@@ -165,6 +165,11 @@ const searchApp = () =>
     /* webpackChunkName: "search" */ "metabase/search/containers/SearchApp"
   ).then(({ SearchApp }) => ({ Component: SearchApp }));
 
+const eventAnalysisPage = () =>
+  import(/* webpackChunkName: "te-analytics" */ "metabase/te-analytics").then(
+    ({ EventAnalysisPage }) => ({ Component: EventAnalysisPage }),
+  );
+
 const collectionLanding = () =>
   import(
     /* webpackChunkName: "collection" */ "metabase/collections/components/CollectionLanding"
@@ -320,6 +325,7 @@ export const getRoutes = (store: AppStore): RouteObject[] => [
               },
 
               { path: "search", lazy: searchApp },
+              { path: "analytics/events", lazy: eventAnalysisPage },
               // Send historical /archive route to trash - can remove in v52
               { path: "archive", element: redirect("../trash") },
               { path: "trash", lazy: trashCollectionLanding },
