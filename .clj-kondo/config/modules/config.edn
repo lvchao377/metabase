@@ -2938,6 +2938,12 @@
    :api  #{metabase.task.secure-delegate.core}
    :uses #{util util.classloader util.config}}
 
+  te-analytics
+  {:team "Querying Platform"
+   :api  #{metabase.te-analytics.api
+           metabase.te-analytics.core}
+   :uses #{api}}
+
   testing-api
   {:team "DevEx"
    :api  #{metabase.testing-api.api

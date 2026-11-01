@@ -68,6 +68,7 @@
    [metabase.sso.api]
    [metabase.sync.api]
    [metabase.task-history.api]
+   [metabase.te-analytics.api]
    [metabase.testing-api.api]
    [metabase.testing-api.core]
    [metabase.tiles.api]
@@ -285,6 +286,7 @@
    "/slack"                (+auth metabase.channel.rest.api/slack-routes)
    "/table"                (+auth metabase.warehouse-schema-rest.api/table-routes)
    "/task"                 (+auth 'metabase.task-history.api)
+   "/te"                   (+auth metabase.te-analytics.api/routes)
    "/testing"              (if metabase.testing-api.core/enable-testing-routes? 'metabase.testing-api.api pass-thru-handler)
    "/tiles"                (+auth 'metabase.tiles.api)
    "/timeline"             (+auth metabase.timeline.api/timeline-routes)
